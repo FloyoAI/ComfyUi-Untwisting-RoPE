@@ -55,7 +55,7 @@ def _hash_update_tensor(h: "hashlib._Hash", t: torch.Tensor, full: bool = True) 
 
 def _hash_any(obj: Any, h: Optional["hashlib._Hash"] = None, depth: int = 0) -> str:
     if h is None:
-        h = hashlib.sha1()
+        h = hashlib.sha256()
     if depth > 12:
         h.update(b'<maxdepth>')
         return h.hexdigest()
@@ -148,7 +148,7 @@ def _make_rf_persistent_key(
     rf_config: Optional[Dict[str, Any]] = None,
     **legacy_rf_params: Any,
 ) -> str:
-    h = hashlib.sha1()
+    h = hashlib.sha256()
 
     h.update(str(tuple(ref_clean.shape)).encode('utf-8'))
     _hash_update_tensor(h, ref_clean, full=True)

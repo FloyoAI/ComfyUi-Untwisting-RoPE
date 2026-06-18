@@ -29,10 +29,13 @@ registry raises an explicit error instead of guessing an order.
 
 from __future__ import annotations
 
-import importlib
+import importlib.util
 import pkgutil
+import re
 from types import ModuleType
 from typing import Any
+
+_SAFE_ADAPTER_MODULE_NAME = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 CONFIG_KEY = "untwisting_rope"
 
@@ -167,6 +170,34 @@ def _is_adapter_module(module: ModuleType) -> bool:
     )
 
 
+def _discovered_adapter_module_names(package_path: list[str]) -> frozenset[str]:
+    """Return adapter module basenames discovered under this package directory."""
+    names: set[str] = set()
+    for module_info in pkgutil.iter_modules(package_path):
+        name = module_info.name
+        if name.startswith("_") or module_info.ispkg:
+            continue
+        if _SAFE_ADAPTER_MODULE_NAME.fullmatch(name):
+            names.add(name)
+    return frozenset(names)
+
+
+def _import_adapter_module(
+    package_name: str,
+    module_name: str,
+    allowed_names: frozenset[str],
+) -> ModuleType:
+    """Import one adapter sub-module after whitelist validation."""
+    if module_name not in allowed_names:
+        raise ValueError(f"Refusing to import non-whitelisted adapter module: {module_name!r}")
+    spec = importlib.util.find_spec(f".{module_name}", package=package_name)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Adapter module not found: {module_name!r}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _load_adapters() -> tuple[ModuleType, ...]:
     """Import every non-private Python module in this package as an adapter."""
     adapters: list[ModuleType] = []
@@ -174,17 +205,11 @@ def _load_adapters() -> tuple[ModuleType, ...]:
 
     package_path = __path__  # type: ignore[name-defined]
     package_name = __name__
+    allowed_names = _discovered_adapter_module_names(package_path)
 
-    for module_info in pkgutil.iter_modules(package_path):
-        name = module_info.name
-        if name.startswith("_"):
-            continue
-        if module_info.ispkg:
-            continue
-
-        qualified_name = f"{package_name}.{name}"
+    for name in sorted(allowed_names):
         try:
-            module = importlib.import_module(qualified_name)
+            module = _import_adapter_module(package_name, name, allowed_names)
         except Exception as exc:
             _IMPORT_ERRORS[name] = repr(exc)
             continue
